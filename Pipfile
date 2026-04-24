@@ -11,6 +11,13 @@ djangorestframework-simplejwt = {extras = ["crypto"], version = "*"}
 google-auth = "*"
 requests = "*"
 dotenv = "*"
+dj-database-url = "*"
+whitenoise = "*"
+gunicorn = "*"
+psycopg = "*"
+psycopg2 = "*"
+psycopg2-binary = "*"
+python-dotenv = "*"
 
 [dev-packages]
 
