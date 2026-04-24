@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in with Google</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    body {
+    background: linear-gradient(to bottom, #111827, #1f2937);
+    font-family: sans-serif;
+    color: white;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+  }
+  .card {
+    background-color: #1f2937;
+    padding: 2rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+  }
+  .google-button {
+    display: flex;
+    justify-content: center;
+    margin-top: 1rem;
+  }
+  .google-custom-btn {
+    width: 100%;
+    border: 0;
+    border-radius: 999px;
+    padding: 0.9rem 1rem;
+    background: white;
+    color: #111827;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .google-custom-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.18);
+  }
+  .google-custom-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+    transform: none;
+    box-shadow: none;
+  }
+  .loading, .error, .success {
+    margin-top: 1rem;
+    font-size: 0.9rem;
+  }
+  .error {
+    color: red;
+  }
+  .success {
+    color: green;
+  }
+  .token-display {
+    background-color: #374151;
+    padding: 1rem;
+    border-radius: 0.25rem;
+    margin-top: 1rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-family: monospace;
+    font-size: 0.75rem;
+    text-align: left;
+  }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Welcome</h2>
+    <p>Sign in to your account</p>
+    <button id="googleCustomBtn" type="button" class="google-custom-btn">
+      Continue with Google
+    </button>
+    <div id="googleSignInDiv" class="google-button"></div>
+    <div id="loading" class="loading" style="display: none;">Signing in…</div>
+    <div id="error" class="error" style="display: none;"></div>
+    <div id="success" class="success" style="display: none;"></div>
+    <div id="tokenDisplay" class="token-display" style="display: none;"></div>
+    <p style="font-size: 0.75rem; margin-top: 2rem;">
+        By signing in, you agree to our
+        <a href="#" style="color: #3b82f6;">Terms of Service</a> and
+        <a href="#" style="color: #3b82f6;">Privacy Policy</a>.
+    </p>
+    </div>
+
+  <script>
+    const defaultApi = "http://127.0.0.1:8000";
+    const api =
+      window.location.protocol.startsWith("http") &&
+      ["127.0.0.1", "localhost"].includes(window.location.hostname) &&
+      window.location.port === "8000"
+        ? window.location.origin
+        : defaultApi;
+    const loginEndpoint = `${api}/google_login/`;
+    const googleClientId =
+      "837698473317-t5q16ilivsc2j2ulgqujune182sjtulc.apps.googleusercontent.com";
+    const loadingEl = document.getElementById("loading");
+    const errorEl = document.getElementById("error");
+    const successEl = document.getElementById("success");
+    const tokenDisplayEl = document.getElementById("tokenDisplay");
+    const googleCustomBtnEl = document.getElementById("googleCustomBtn");
+    let codeClient = null;
+
+    function setLoading(isLoading, message = "Signing in...") {
+      loadingEl.textContent = message;
+      loadingEl.style.display = isLoading ? "block" : "none";
+      googleCustomBtnEl.disabled = isLoading;
+    }
+
+    function clearMessages() {
+      errorEl.style.display = "none";
+      successEl.style.display = "none";
+      tokenDisplayEl.style.display = "none";
+    }
+
+    function showError(message) {
+      errorEl.textContent = message;
+      errorEl.style.display = "block";
+      successEl.style.display = "none";
+    }
+
+    function showSuccess(message, payload) {
+      successEl.textContent = message;
+      successEl.style.display = "block";
+      tokenDisplayEl.textContent = JSON.stringify(payload, null, 2);
+      tokenDisplayEl.style.display = "block";
+    }
+
+    async function parseResponse(response) {
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        return response.json();
+      }
+
+      const text = await response.text();
+      return text ? { error: text } : {};
+    }
+
+    async function postGoogleLogin(formData) {
+      const response = await fetch(loginEndpoint, {
+        method: "POST",
+        headers: { "X-Requested-With": "XmlHttpRequest" },
+        body: formData,
+      });
+      const data = await parseResponse(response);
+
+      if (!response.ok) {
+        throw new Error(
+          data.error || data.detail || `Login failed with status ${response.status}.`
+        );
+      }
+
+      return data;
+    }
+
+    async function handleGoogleCode(response) {
+      clearMessages();
+
+      if (window.location.protocol === "file:") {
+        showError(
+          "Serve this page from http://localhost or http://127.0.0.1 instead of opening it with file://."
+        );
+        return;
+      }
+
+      if (!response || !response.code) {
+        showError("Google did not return an authorization code.");
+        return;
+      }
+
+      setLoading(true);
+
+      try {
+        const formData = new FormData();
+        formData.append("code", response.code);
+
+        const data = await postGoogleLogin(formData);
+        showSuccess("Login successful. Tokens received below.", data);
+      } catch (error) {
+        console.error("Google login failed:", error);
+        const message =
+          error instanceof TypeError
+            ? `Cannot reach ${loginEndpoint}. Make sure your Django server is running and that this page is served from an allowed origin.`
+            : error.message;
+        showError(message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function initializeGoogleLogin() {
+      if (!window.google || !window.google.accounts || !window.google.accounts.oauth2) {
+        showError("Google Sign-In failed to load. Refresh the page and try again.");
+        googleCustomBtnEl.disabled = true;
+        return;
+      }
+
+      codeClient = google.accounts.oauth2.initCodeClient({
+        client_id: googleClientId,
+        scope: "openid email profile",
+        ux_mode: "popup",
+        callback: handleGoogleCode,
+      });
+    }
+
+    googleCustomBtnEl.addEventListener("click", () => {
+      clearMessages();
+
+      if (!codeClient) {
+        showError("Google Sign-In is not ready yet. Refresh the page and try again.");
+        return;
+      }
+
+      try {
+        codeClient.requestCode();
+      } catch (error) {
+        console.error("Could not start Google Sign-In:", error);
+        showError("Could not open the Google sign-in popup. Please try again.");
+      }
+    });
+
+    window.addEventListener("load", initializeGoogleLogin);
+  </script>
+</body>
+</html>

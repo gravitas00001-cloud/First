@@ -1,0 +1,86 @@
+{% extends "Core/base.html" %}
+{% load static %}
+
+{% block title %}{{ app_name }} | Dashboard{% endblock %}
+
+{% block body_class %}dashboard-page{% endblock %}
+
+{% block content %}
+<main class="dashboard-shell">
+    <header class="dashboard-header">
+        <div>
+            <p class="eyebrow">Protected workspace</p>
+            <h1 id="dashboardGreeting">Loading your dashboard...</h1>
+            <p class="dashboard-subcopy" id="dashboardSubtitle">
+                Checking your session and preparing your account overview.
+            </p>
+        </div>
+        <div class="dashboard-actions">
+            <button id="refreshSessionButton" type="button" class="button button-secondary">Refresh session</button>
+            <button id="signOutButton" type="button" class="button button-primary">Sign out</button>
+        </div>
+    </header>
+
+    <section id="dashboardNotice" class="form-feedback" hidden></section>
+
+    <section class="dashboard-grid">
+        <article class="dashboard-card card-emphasis">
+            <p class="card-label">Account snapshot</p>
+            <h2 id="dashboardUserName">...</h2>
+            <div class="profile-stack">
+                <div>
+                    <span class="meta-label">Email</span>
+                    <p id="dashboardEmail">...</p>
+                </div>
+                <div>
+                    <span class="meta-label">Sign-in method</span>
+                    <p id="dashboardRegistrationMethod">...</p>
+                </div>
+                <div>
+                    <span class="meta-label">Status</span>
+                    <p><span class="status-badge" id="dashboardStatusBadge">Checking</span></p>
+                </div>
+            </div>
+        </article>
+
+        <article class="dashboard-card">
+            <p class="card-label">Session health</p>
+            <div class="metric-row">
+                <div class="metric">
+                    <span class="metric-value" id="dashboardSessionState">...</span>
+                    <span class="metric-label">Access state</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-value" id="dashboardExpiryTime">...</span>
+                    <span class="metric-label">Access expires</span>
+                </div>
+            </div>
+            <p class="helper-copy" id="dashboardSessionHint">
+                Refresh tokens stay in storage so the dashboard can recover gracefully when the access token expires.
+            </p>
+        </article>
+
+        <article class="dashboard-card">
+            <p class="card-label">What opened up</p>
+            <ul class="plain-list" id="dashboardHighlights">
+                <li>Secure session initialized.</li>
+                <li>User profile available to authenticated requests.</li>
+                <li>Redirect flow completed successfully.</li>
+            </ul>
+        </article>
+
+        <article class="dashboard-card">
+            <p class="card-label">Next moves</p>
+            <ul class="plain-list">
+                <li>Connect this dashboard to your real product data when you are ready.</li>
+                <li>Use the protected `/api/me/` endpoint as the pattern for future authenticated APIs.</li>
+                <li>Keep the sign-out action as the clean way back to the auth screens.</li>
+            </ul>
+        </article>
+    </section>
+</main>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="{% static 'Core/dashboard.js' %}" defer></script>
+{% endblock %}

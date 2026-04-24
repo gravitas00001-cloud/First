@@ -1,0 +1,119 @@
+{% extends "Core/base.html" %}
+{% load static %}
+
+{% block title %}{{ app_name }} | Welcome{% endblock %}
+
+{% block extra_head %}
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+{% endblock %}
+
+{% block body_class %}auth-page{% endblock %}
+
+{% block content %}
+<main class="auth-layout">
+    <section class="hero-panel">
+        <div class="brand-lockup">
+            <div class="brand-mark">FK</div>
+            <div>
+                <p class="eyebrow">Secure access</p>
+                <h1>{{ app_name }}</h1>
+            </div>
+        </div>
+        <p class="hero-copy">
+            Create an account, verify your email, or jump back in with Google. Everything lands in one
+            polished dashboard the moment you are signed in.
+        </p>
+        <div class="hero-stack">
+            <article class="hero-card">
+                <span class="hero-card-label">Email sign up</span>
+                <strong>Fast onboarding with one-time code verification.</strong>
+                <p>Your password stays protected while the email OTP confirms account ownership.</p>
+            </article>
+            <article class="hero-card">
+                <span class="hero-card-label">Google sign in</span>
+                <strong>One click when you want the shortest route.</strong>
+                <p>New Google users are created automatically, and returning users go straight to the dashboard.</p>
+            </article>
+            <article class="hero-card">
+                <span class="hero-card-label">Dashboard ready</span>
+                <strong>Your account view loads from live auth state.</strong>
+                <p>Profile details, session status, and quick actions are all available after login.</p>
+            </article>
+        </div>
+    </section>
+
+    <section class="auth-panel">
+        <div class="auth-card">
+            <div class="panel-switch" role="tablist" aria-label="Authentication options">
+                <button class="switch-button is-active" id="loginTabButton" type="button" data-mode="login">Sign in</button>
+                <button class="switch-button" id="signupTabButton" type="button" data-mode="signup">Create account</button>
+            </div>
+
+            <section class="auth-view is-active" id="loginView" aria-labelledby="loginTabButton">
+                <div class="section-heading">
+                    <p class="eyebrow">Welcome back</p>
+                    <h2>Sign in to continue</h2>
+                    <p>Use email and password or keep moving with Google.</p>
+                </div>
+
+                <button id="googleAuthButton" type="button" class="button button-google">
+                    <span>Continue with Google</span>
+                </button>
+                <p class="helper-copy" id="googleHelperText">
+                    Google sign-in is available from this page and will redirect you to your dashboard.
+                </p>
+
+                <div class="divider"><span>or sign in with email</span></div>
+
+                <form id="loginForm" class="auth-form">
+                    <label class="field">
+                        <span>Email address</span>
+                        <input type="email" name="email" autocomplete="email" placeholder="you@example.com" required>
+                    </label>
+                    <label class="field">
+                        <span>Password</span>
+                        <input type="password" name="password" autocomplete="current-password" placeholder="Enter your password" required>
+                    </label>
+                    <div id="loginFeedback" class="form-feedback" hidden></div>
+                    <button id="loginSubmitButton" type="submit" class="button button-primary">Open dashboard</button>
+                </form>
+            </section>
+
+            <section class="auth-view" id="signupView" aria-labelledby="signupTabButton" hidden>
+                <div class="section-heading">
+                    <p class="eyebrow">New here</p>
+                    <h2>Create your account</h2>
+                    <p>We will send a {{ signup_otp_length }}-digit code to confirm your email before activation.</p>
+                </div>
+
+                <form id="signupForm" class="auth-form">
+                    <div class="form-grid">
+                        <label class="field">
+                            <span>First name</span>
+                            <input type="text" name="first_name" autocomplete="given-name" placeholder="Ada" required>
+                        </label>
+                        <label class="field">
+                            <span>Last name</span>
+                            <input type="text" name="last_name" autocomplete="family-name" placeholder="Lovelace" required>
+                        </label>
+                    </div>
+                    <label class="field">
+                        <span>Email address</span>
+                        <input type="email" name="email" autocomplete="email" placeholder="ada@example.com" required>
+                    </label>
+                    <label class="field">
+                        <span>Password</span>
+                        <input type="password" name="password" autocomplete="new-password" placeholder="Create a strong password" required>
+                    </label>
+                    <div id="signupFeedback" class="form-feedback" hidden></div>
+                    <button id="signupSubmitButton" type="submit" class="button button-primary">Send verification code</button>
+                </form>
+            </section>
+        </div>
+    </section>
+</main>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="{% static 'Core/auth.js' %}" defer></script>
+{% endblock %}
