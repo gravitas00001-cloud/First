@@ -100,9 +100,14 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     async function handleGoogleCode(response) {
         app.hideFeedback(loginFeedback);
+        console.info("Google OAuth callback received", response);
 
         if (!response || !response.code) {
-            app.showFeedback(loginFeedback, "Google did not return an authorization code.", "error");
+            const message = response && response.error
+                ? `Google sign-in failed: ${response.error}`
+                : "Google did not return an authorization code.";
+            console.error("Google OAuth did not return a usable code", response);
+            app.showFeedback(loginFeedback, message, "error");
             return;
         }
 
@@ -127,6 +132,21 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
     }
 
+    function handleGooglePopupError(error) {
+        console.error("Google OAuth popup error", error);
+
+        let message = "Google sign-in could not be completed. Please try again.";
+        if (error && error.type === "popup_failed_to_open") {
+            message = "The Google sign-in popup was blocked by your browser. Allow popups and try again.";
+        } else if (error && error.type === "popup_closed") {
+            message = "The Google sign-in popup was closed before completion.";
+        } else if (error && error.type) {
+            message = `Google sign-in failed: ${error.type}`;
+        }
+
+        app.showFeedback(loginFeedback, message, "error");
+    }
+
     function initializeGoogleAuth() {
         if (!config.googleClientId) {
             googleAuthButton.disabled = true;
@@ -142,7 +162,9 @@ document.addEventListener("DOMContentLoaded", async () => {
                     client_id: config.googleClientId,
                     scope: "openid email profile",
                     ux_mode: "popup",
+                    select_account: true,
                     callback: handleGoogleCode,
+                    error_callback: handleGooglePopupError,
                 });
                 googleAuthButton.disabled = false;
                 googleHelperText.textContent = "Google sign-in is ready and will route successful users to the dashboard.";
