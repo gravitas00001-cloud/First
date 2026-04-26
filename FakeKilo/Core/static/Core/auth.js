@@ -14,6 +14,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const loginSubmitButton = document.getElementById("loginSubmitButton");
     const signupSubmitButton = document.getElementById("signupSubmitButton");
     let codeClient = null;
+    let redirectCodeClient = null;
 
     if (await app.redirectToDashboardIfAuthenticated()) {
         return;
@@ -98,24 +99,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
     }
 
-    async function handleGoogleCode(response) {
-        app.hideFeedback(loginFeedback);
-        console.info("Google OAuth callback received", response);
-
-        if (!response || !response.code) {
-            const message = response && response.error
-                ? `Google sign-in failed: ${response.error}`
-                : "Google did not return an authorization code.";
-            console.error("Google OAuth did not return a usable code", response);
-            app.showFeedback(loginFeedback, message, "error");
-            return;
-        }
-
+    async function exchangeGoogleCode(code) {
         setButtonBusy(googleAuthButton, true, "Continue with Google", "Connecting to Google...");
 
         try {
             const formData = new FormData();
-            formData.append("code", response.code);
+            formData.append("code", code);
 
             const data = await app.request(config.urls.googleLogin, {
                 method: "POST",
@@ -132,6 +121,60 @@ document.addEventListener("DOMContentLoaded", async () => {
         }
     }
 
+    async function handleGoogleCode(response) {
+        app.hideFeedback(loginFeedback);
+        console.info("Google OAuth callback received", response);
+
+        if (!response || !response.code) {
+            const message = response && response.error
+                ? `Google sign-in failed: ${response.error}`
+                : "Google did not return an authorization code.";
+            console.error("Google OAuth did not return a usable code", response);
+            app.showFeedback(loginFeedback, message, "error");
+            return;
+        }
+
+        await exchangeGoogleCode(response.code);
+    }
+
+    async function handleRedirectCodeFromUrl() {
+        const currentUrl = new URL(window.location.href);
+        const code = currentUrl.searchParams.get("code");
+        const error = currentUrl.searchParams.get("error");
+
+        if (!code && !error) {
+            return false;
+        }
+
+        currentUrl.searchParams.delete("code");
+        currentUrl.searchParams.delete("scope");
+        currentUrl.searchParams.delete("authuser");
+        currentUrl.searchParams.delete("prompt");
+        currentUrl.searchParams.delete("error");
+        if (window.history && window.history.replaceState) {
+            window.history.replaceState({}, document.title, `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+        }
+
+        if (error) {
+            console.error("Google redirect flow returned an error", error);
+            app.showFeedback(loginFeedback, `Google sign-in failed: ${error}`, "error");
+            return true;
+        }
+
+        await exchangeGoogleCode(code);
+        return true;
+    }
+
+    function startRedirectGoogleAuth() {
+        if (!redirectCodeClient) {
+            app.showFeedback(loginFeedback, "Google sign-in fallback is not ready yet. Please refresh and try again.", "error");
+            return;
+        }
+
+        app.showFeedback(loginFeedback, "Switching to full-page Google sign-in...", "success");
+        redirectCodeClient.requestCode();
+    }
+
     function handleGooglePopupError(error) {
         console.error("Google OAuth popup error", error);
 
@@ -139,12 +182,18 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (error && error.type === "popup_failed_to_open") {
             message = "The Google sign-in popup was blocked by your browser. Allow popups and try again.";
         } else if (error && error.type === "popup_closed") {
-            message = "The Google sign-in popup was closed before completion.";
+            message = "The Google sign-in popup could not finish. Switching to a full-page Google sign-in flow.";
         } else if (error && error.type) {
             message = `Google sign-in failed: ${error.type}`;
         }
 
-        app.showFeedback(loginFeedback, message, "error");
+        app.showFeedback(loginFeedback, message, error && error.type === "popup_closed" ? "success" : "error");
+
+        if (error && error.type === "popup_closed") {
+            window.setTimeout(() => {
+                startRedirectGoogleAuth();
+            }, 250);
+        }
     }
 
     function initializeGoogleAuth() {
@@ -165,6 +214,12 @@ document.addEventListener("DOMContentLoaded", async () => {
                     select_account: true,
                     callback: handleGoogleCode,
                     error_callback: handleGooglePopupError,
+                });
+                redirectCodeClient = window.google.accounts.oauth2.initCodeClient({
+                    client_id: config.googleClientId,
+                    scope: "openid email profile",
+                    ux_mode: "redirect",
+                    redirect_uri: window.location.origin + window.location.pathname,
                 });
                 googleAuthButton.disabled = false;
                 googleHelperText.textContent = "Google sign-in is ready and will route successful users to the dashboard.";
@@ -201,9 +256,14 @@ document.addEventListener("DOMContentLoaded", async () => {
         try {
             codeClient.requestCode();
         } catch (error) {
-            app.showFeedback(loginFeedback, "Could not open the Google sign-in popup. Please try again.", "error");
+            console.error("Google sign-in popup request failed", error);
+            startRedirectGoogleAuth();
         }
     });
+
+    if (await handleRedirectCodeFromUrl()) {
+        return;
+    }
 
     initializeGoogleAuth();
     setActiveMode("login");
