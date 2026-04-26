@@ -22,8 +22,8 @@ A Django-based authentication and user management system with email verification
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/gravitas00001-cloud/Gravit.git
-cd Gravit
+git clone https://github.com/gravitas00001-cloud/First.git
+cd First
 ```
 
 ### 2. Create and activate virtual environment
@@ -57,17 +57,17 @@ RESEND_FROM_EMAIL=your-email@domain.com
 
 ### 5. Apply migrations
 ```bash
-python manage.py migrate
+python FakeKilo/manage.py migrate
 ```
 
 ### 6. Create superuser (optional)
 ```bash
-python manage.py createsuperuser
+python FakeKilo/manage.py createsuperuser
 ```
 
 ### 7. Run development server
 ```bash
-python manage.py runserver
+python FakeKilo/manage.py runserver
 ```
 
 Access at `http://localhost:8000`
@@ -85,7 +85,7 @@ Access at `http://localhost:8000`
 
 ### Using Gunicorn
 ```bash
-gunicorn FakeKilo.wsgi:application --bind 0.0.0.0:8000
+gunicorn --chdir FakeKilo FakeKilo.wsgi:application --bind 0.0.0.0:8000
 ```
 
 ### Using Docker (Optional)
@@ -93,13 +93,18 @@ Create a `Dockerfile` and deploy to your container platform.
 
 ### Database Migration (Production)
 ```bash
-python manage.py migrate --settings=FakeKilo.settings
+python FakeKilo/manage.py migrate --settings=FakeKilo.settings
 ```
 
 ### Collect Static Files
 ```bash
-python manage.py collectstatic --noinput
+python FakeKilo/manage.py collectstatic --noinput
 ```
+
+### Railway Deployment Notes
+- Set `RAILWAY_PUBLIC_DOMAIN` to your generated Railway domain if you want it appended automatically to `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, and `CSRF_TRUSTED_ORIGINS`.
+- The app now falls back to SQLite when `DATABASE_URL` is not set, but Railway production should still use a PostgreSQL `DATABASE_URL`.
+- Gunicorn binds to `PORT`, which Railway injects at runtime.
 
 ## API Endpoints
 
@@ -142,18 +147,18 @@ EMAIL_USE_TLS=True
 
 ### Port Already in Use
 ```bash
-python manage.py runserver 8001
+python FakeKilo/manage.py runserver 8001
 ```
 
 ### Database Issues
 ```bash
-python manage.py migrate
-python manage.py migrate --run-syncdb
+python FakeKilo/manage.py migrate
+python FakeKilo/manage.py migrate --run-syncdb
 ```
 
 ### Static Files Not Loading
 ```bash
-python manage.py collectstatic --clear --noinput
+python FakeKilo/manage.py collectstatic --clear --noinput
 ```
 
 ## Contributing
@@ -170,5 +175,3 @@ This project is licensed under the MIT License.
 ## Support
 
 For issues and questions, please create an issue on GitHub.
-# First
-# First

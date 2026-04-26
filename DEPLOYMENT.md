@@ -112,7 +112,35 @@ This guide covers multiple deployment options for your Django application.
 
 ---
 
-## Option 4: DigitalOcean Droplet (Full Control)
+## Option 4: Railway Deployment
+
+### Recommended Railway Configuration
+
+1. **Connect the GitHub repository** in Railway.
+2. **Add a PostgreSQL service** and expose its `DATABASE_URL` to the web service.
+3. **Set environment variables**:
+   ```bash
+   DEBUG=False
+   SECRET_KEY=your-secret-key
+   ALLOWED_HOSTS=your-app.up.railway.app
+   CORS_ALLOWED_ORIGINS=https://your-app.up.railway.app
+   CSRF_TRUSTED_ORIGINS=https://your-app.up.railway.app
+   RAILWAY_PUBLIC_DOMAIN=your-app.up.railway.app
+   GOOGLE_OAUTH_ALLOWED_ORIGINS=https://your-app.up.railway.app
+   ```
+4. **Deploy normally**:
+   - The release command runs migrations.
+   - Gunicorn binds to Railway's `PORT`.
+   - Static files are served with WhiteNoise after `collectstatic`.
+
+### Railway Troubleshooting
+- If migrations fail during deploy, confirm `DATABASE_URL` is available to the web service and not just the database service.
+- If the app loops on HTTPS redirects, confirm Railway is sending `X-Forwarded-Proto` and keep `SECURE_PROXY_SSL_HEADER` enabled.
+- If Google sign-in fails in production, make sure the Railway URL is included in both Google OAuth redirect origins and Django's trusted origin settings.
+
+---
+
+## Option 5: DigitalOcean Droplet (Full Control)
 
 ### Manual Setup on Droplet
 
@@ -162,6 +190,7 @@ This guide covers multiple deployment options for your Django application.
    Group=www-data
    WorkingDirectory=/var/First
    ExecStart=/var/First/venv/bin/gunicorn \
+     --chdir /var/First/FakeKilo \
      FakeKilo.wsgi:application \
      --bind 127.0.0.1:8000 \
      --workers 4 \

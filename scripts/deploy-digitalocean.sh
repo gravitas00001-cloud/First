@@ -31,7 +31,7 @@ if [ "$CHOICE" = "1" ]; then
     echo "   - GOOGLE_OAUTH_CLIENT_SECRET"
     echo ""
     echo "6. Set build command: pip install -r requirements.txt"
-    echo "7. Set run command: gunicorn FakeKilo.wsgi:application --bind 0.0.0.0:8080"
+    echo "7. Set run command: gunicorn --chdir FakeKilo FakeKilo.wsgi:application --bind 0.0.0.0:8080"
     echo "8. Click 'Create App'"
 
 elif [ "$CHOICE" = "2" ]; then

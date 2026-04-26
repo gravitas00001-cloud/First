@@ -28,12 +28,9 @@ services:
       - "8000:8000"
     environment:
       - DEBUG=True
-      - DB_ENGINE=django.db.backends.postgresql
-      - DB_NAME=${DB_NAME:-fakekilo}
-      - DB_USER=${DB_USER:-postgres}
-      - DB_PASSWORD=${DB_PASSWORD:-postgres}
-      - DB_HOST=db
-      - DB_PORT=5432
+      - ALLOWED_HOSTS=localhost,127.0.0.1
+      - DATABASE_URL=postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-fakekilo}
+      - DATABASE_SSL_REQUIRE=False
     depends_on:
       db:
         condition: service_healthy

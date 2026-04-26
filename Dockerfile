@@ -34,4 +34,4 @@ RUN python FakeKilo/manage.py collectstatic --noinput
 EXPOSE 8000
 
 # Run gunicorn
-CMD ["gunicorn", "FakeKilo.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "4"]
+CMD ["sh", "-c", "gunicorn --chdir FakeKilo FakeKilo.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 4 --log-file -"]

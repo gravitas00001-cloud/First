@@ -11,26 +11,30 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 from pathlib import Path
+from urllib.parse import urlsplit
 
+import dj_database_url
 from decouple import config
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+# Load environment variables from the documented repo-root .env first,
+# then fall back to the project-local .env used by some existing setups.
+for env_file in (BASE_DIR.parent / ".env", BASE_DIR / ".env"):
+    load_dotenv(env_file)
 
 
 DEFAULT_ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
 DEFAULT_LOCAL_ORIGINS = [
     "http://127.0.0.1:8000",
     "http://localhost:8000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3000",
     "http://127.0.0.1:5500",
     "http://localhost:5500",
-    "astality.site",
-    "postgres-production-4335f.up.railway.app",
 ]
+DEFAULT_TRUSTED_ORIGINS = list(DEFAULT_LOCAL_ORIGINS)
 TRUTHY_ENV_VALUES = {"1", "true", "t", "yes", "y", "on", "debug", "development", "dev"}
 FALSY_ENV_VALUES = {"0", "false", "f", "no", "n", "off", "", "release", "production", "prod"}
 
@@ -61,6 +65,44 @@ def env_list(name, default=None):
     return list(default or [])
 
 
+def env_int(name, default=0):
+    return config(name, cast=int, default=default)
+
+
+def normalize_origin(value):
+    item = str(value).strip()
+    if not item:
+        return None
+
+    parsed = urlsplit(item)
+    if not parsed.scheme or not parsed.netloc:
+        return None
+
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def normalize_host(value):
+    item = str(value).strip()
+    if not item:
+        return None
+
+    parsed = urlsplit(item if "://" in item else f"https://{item}")
+    return parsed.hostname
+
+
+def extend_unique(values, candidate):
+    if candidate and candidate not in values:
+        values.append(candidate)
+
+
+RAILWAY_PUBLIC_DOMAIN = normalize_host(config("RAILWAY_PUBLIC_DOMAIN", default=""))
+if RAILWAY_PUBLIC_DOMAIN:
+    railway_origin = f"https://{RAILWAY_PUBLIC_DOMAIN}"
+    extend_unique(DEFAULT_ALLOWED_HOSTS, RAILWAY_PUBLIC_DOMAIN)
+    extend_unique(DEFAULT_LOCAL_ORIGINS, railway_origin)
+    extend_unique(DEFAULT_TRUSTED_ORIGINS, railway_origin)
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
@@ -72,31 +114,44 @@ SECRET_KEY = config(
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env_flag("DEBUG", default=False)
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # Security settings for production
 if not DEBUG:
     SECURE_SSL_REDIRECT = env_flag("SECURE_SSL_REDIRECT", default=True)
     SESSION_COOKIE_SECURE = env_flag("SESSION_COOKIE_SECURE", default=True)
     CSRF_COOKIE_SECURE = env_flag("CSRF_COOKIE_SECURE", default=True)
-    SECURE_BROWSER_XSS_FILTER = True
-    SECURE_CONTENT_SECURITY_POLICY = {
-        "default-src": ("'self'",),
-    }
+    SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = "DENY"
-    SECURE_HSTS_SECONDS = env_flag("SECURE_HSTS_SECONDS", default=31536000)
+    SECURE_HSTS_SECONDS = env_int("SECURE_HSTS_SECONDS", default=31536000)
     SECURE_HSTS_INCLUDE_SUBDOMAINS = env_flag("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=True)
     SECURE_HSTS_PRELOAD = env_flag("SECURE_HSTS_PRELOAD", default=True)
 
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", default=DEFAULT_ALLOWED_HOSTS)
-CORS_ALLOWED_ORIGINS = env_list("CORS_ALLOWED_ORIGINS", default=DEFAULT_LOCAL_ORIGINS)
-GOOGLE_OAUTH_ALLOWED_ORIGINS = env_list(
-    "GOOGLE_OAUTH_ALLOWED_ORIGINS",
-    default=CORS_ALLOWED_ORIGINS,
-)
-
+CORS_ALLOWED_ORIGINS = [
+    origin
+    for origin in (
+        normalize_origin(value)
+        for value in env_list("CORS_ALLOWED_ORIGINS", default=DEFAULT_LOCAL_ORIGINS)
+    )
+    if origin
+]
+GOOGLE_OAUTH_ALLOWED_ORIGINS = [
+    origin
+    for origin in (
+        normalize_origin(value)
+        for value in env_list("GOOGLE_OAUTH_ALLOWED_ORIGINS", default=CORS_ALLOWED_ORIGINS)
+    )
+    if origin
+]
 CSRF_TRUSTED_ORIGINS = [
-    "https://astality.site",
-    "https://postgres-production-4335f.up.railway.app",
+    origin
+    for origin in (
+        normalize_origin(value)
+        for value in env_list("CSRF_TRUSTED_ORIGINS", default=DEFAULT_TRUSTED_ORIGINS)
+    )
+    if origin
 ]
 
 
@@ -117,6 +172,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'Core.middleware.DevCorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -155,15 +211,22 @@ WSGI_APPLICATION = 'FakeKilo.wsgi.application'
 #         'NAME': BASE_DIR / 'db.sqlite3',
 #     }
 # }
-
-import dj_database_url
-DATABASES = {
-    'default': dj_database_url.config(
-
-        conn_max_age=600,
-        ssl_require=True
-    )
-}
+DATABASE_URL = str(config("DATABASE_URL", default="")).strip()
+if DATABASE_URL:
+    DATABASES = {
+        'default': dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=env_int("DATABASE_CONN_MAX_AGE", default=600),
+            ssl_require=env_flag("DATABASE_SSL_REQUIRE", default=True),
+        )
+    }
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 
 # Password validation
@@ -200,9 +263,14 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / 'Core' / 'static']
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 # Media files
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
@@ -215,7 +283,7 @@ REST_FRAMEWORK = {
     ]
 }
 
-GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID')
+GOOGLE_OAUTH_CLIENT_ID = config('GOOGLE_OAUTH_CLIENT_ID', default='')
 GOOGLE_OAUTH_CLIENT_SECRET = config(
     'GOOGLE_OAUTH_CLIENT_SECRET',
     default=config('GOOGLE_OAUTH_CLIENT_SECET', default='')
