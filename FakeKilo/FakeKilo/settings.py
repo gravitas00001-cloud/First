@@ -34,6 +34,7 @@ DEFAULT_LOCAL_ORIGINS = [
     "http://127.0.0.1:5500",
     "http://localhost:5500",
 ]
+DEFAULT_PUBLIC_DOMAINS = ["astality.site", "www.astality.site"]
 DEFAULT_TRUSTED_ORIGINS = list(DEFAULT_LOCAL_ORIGINS)
 TRUTHY_ENV_VALUES = {"1", "true", "t", "yes", "y", "on", "debug", "development", "dev"}
 FALSY_ENV_VALUES = {"0", "false", "f", "no", "n", "off", "", "release", "production", "prod"}
@@ -53,16 +54,23 @@ def env_flag(name, default=False):
     return default
 
 
-def env_list(name, default=None):
+def env_list(name, default=None, merge_default=False):
     value = config(name, default="")
+    base_values = list(default or [])
     if value is None:
-        return list(default or [])
+        return base_values
 
     parsed_values = [item.strip() for item in str(value).split(",") if item.strip()]
+    if merge_default:
+        merged_values = list(base_values)
+        for item in parsed_values:
+            extend_unique(merged_values, item)
+        return merged_values
+
     if parsed_values:
         return parsed_values
 
-    return list(default or [])
+    return base_values
 
 
 def env_int(name, default=0):
@@ -93,6 +101,12 @@ def normalize_host(value):
 def extend_unique(values, candidate):
     if candidate and candidate not in values:
         values.append(candidate)
+
+
+for public_domain in DEFAULT_PUBLIC_DOMAINS:
+    extend_unique(DEFAULT_ALLOWED_HOSTS, public_domain)
+    extend_unique(DEFAULT_LOCAL_ORIGINS, f"https://{public_domain}")
+    extend_unique(DEFAULT_TRUSTED_ORIGINS, f"https://{public_domain}")
 
 
 RAILWAY_PUBLIC_DOMAIN = normalize_host(config("RAILWAY_PUBLIC_DOMAIN", default=""))
@@ -128,12 +142,20 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = env_flag("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=True)
     SECURE_HSTS_PRELOAD = env_flag("SECURE_HSTS_PRELOAD", default=True)
 
-ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", default=DEFAULT_ALLOWED_HOSTS)
+ALLOWED_HOSTS = env_list(
+    "ALLOWED_HOSTS",
+    default=DEFAULT_ALLOWED_HOSTS,
+    merge_default=True,
+)
 CORS_ALLOWED_ORIGINS = [
     origin
     for origin in (
         normalize_origin(value)
-        for value in env_list("CORS_ALLOWED_ORIGINS", default=DEFAULT_LOCAL_ORIGINS)
+        for value in env_list(
+            "CORS_ALLOWED_ORIGINS",
+            default=DEFAULT_LOCAL_ORIGINS,
+            merge_default=True,
+        )
     )
     if origin
 ]
@@ -141,7 +163,11 @@ GOOGLE_OAUTH_ALLOWED_ORIGINS = [
     origin
     for origin in (
         normalize_origin(value)
-        for value in env_list("GOOGLE_OAUTH_ALLOWED_ORIGINS", default=CORS_ALLOWED_ORIGINS)
+        for value in env_list(
+            "GOOGLE_OAUTH_ALLOWED_ORIGINS",
+            default=CORS_ALLOWED_ORIGINS,
+            merge_default=True,
+        )
     )
     if origin
 ]
@@ -149,7 +175,11 @@ CSRF_TRUSTED_ORIGINS = [
     origin
     for origin in (
         normalize_origin(value)
-        for value in env_list("CSRF_TRUSTED_ORIGINS", default=DEFAULT_TRUSTED_ORIGINS)
+        for value in env_list(
+            "CSRF_TRUSTED_ORIGINS",
+            default=DEFAULT_TRUSTED_ORIGINS,
+            merge_default=True,
+        )
     )
     if origin
 ]
@@ -266,9 +296,14 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATICFILES_DIRS = [BASE_DIR / 'Core' / 'static']
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_BACKEND = (
+    "django.contrib.staticfiles.storage.StaticFilesStorage"
+    if DEBUG
+    else "whitenoise.storage.CompressedManifestStaticFilesStorage"
+)
 STORAGES = {
     "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        "BACKEND": STATICFILES_BACKEND,
     },
 }
 # Media files

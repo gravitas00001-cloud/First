@@ -1,3 +1,5 @@
+import logging
+from functools import wraps
 from urllib.parse import urlsplit
 
 import requests
@@ -5,7 +7,7 @@ from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ImproperlyConfigured
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import IntegrityError, transaction
+from django.db import DatabaseError, IntegrityError, transaction
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
@@ -18,9 +20,12 @@ from rest_framework.decorators import permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenObtainPairView
 
 from .email_service import EmailDeliveryError, send_signup_otp_email
 from .models import CustomUser, PendingSignup
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_origin(origin):
@@ -55,6 +60,28 @@ def serialize_user(user):
         "last_name": user.last_name,
         "registration_method": user.registration_method,
     }
+
+
+def database_unavailable_response():
+    return Response(
+        {
+            "error": "Database is temporarily unavailable. Please try again shortly.",
+            "status": False,
+        },
+        status=status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
+
+
+def database_guard(view_func):
+    @wraps(view_func)
+    def wrapped(*args, **kwargs):
+        try:
+            return view_func(*args, **kwargs)
+        except DatabaseError:
+            logger.exception("Database operation failed in %s", view_func.__name__)
+            return database_unavailable_response()
+
+    return wrapped
 
 
 def frontend_context():
@@ -101,6 +128,15 @@ def auth_success_response(user):
         },
         status=status.HTTP_200_OK,
     )
+
+
+class SafeTokenObtainPairView(TokenObtainPairView):
+    def post(self, request, *args, **kwargs):
+        try:
+            return super().post(request, *args, **kwargs)
+        except DatabaseError:
+            logger.exception("Database operation failed in token obtain flow")
+            return database_unavailable_response()
 
 
 def signup_conflict_response(user):
@@ -172,6 +208,7 @@ def send_pending_signup_otp(pending_signup):
 
 
 @api_view(["POST"])
+@database_guard
 def request_signup_otp(request):
     first_name = str(request.data.get("first_name", "")).strip()
     last_name = str(request.data.get("last_name", "")).strip()
@@ -247,6 +284,7 @@ def request_signup_otp(request):
 
 
 @api_view(["POST"])
+@database_guard
 def resend_signup_otp(request):
     email = normalize_email_address(request.data.get("email"))
     if not email:
@@ -303,6 +341,7 @@ def resend_signup_otp(request):
 
 
 @api_view(["POST"])
+@database_guard
 def verify_signup_otp(request):
     email = normalize_email_address(request.data.get("email"))
     otp = str(request.data.get("otp", "")).strip()
@@ -382,6 +421,7 @@ def verify_signup_otp(request):
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
+@database_guard
 def current_user(request):
     return Response(
         {
@@ -393,6 +433,7 @@ def current_user(request):
 
 
 @api_view(["POST"])
+@database_guard
 def google_auth(request):
     code = request.data.get("code")
     token = request.data.get("token")

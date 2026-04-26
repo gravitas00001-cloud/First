@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 import requests
 
+from django.db import OperationalError
 from django.test import TestCase
 from django.test.utils import override_settings
 from django.utils import timezone
@@ -130,6 +131,27 @@ class GoogleAuthTests(TestCase):
             {"error": "Google account email is not verified", "status": False},
         )
 
+    @patch("Core.views.id_token.verify_oauth2_token")
+    @patch("Core.views.CustomUser.objects.get_or_create", side_effect=OperationalError("db down"))
+    def test_google_login_returns_503_when_database_is_unavailable(self, _get_or_create, verify_oauth2_token):
+        verify_oauth2_token.return_value = {
+            "email": "ada@example.com",
+            "given_name": "Ada",
+            "family_name": "Lovelace",
+            "email_verified": True,
+        }
+
+        response = self.client.post("/google_login/", {"token": "signed-google-token"})
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {
+                "error": "Database is temporarily unavailable. Please try again shortly.",
+                "status": False,
+            },
+        )
+
 
 class CurrentUserApiTests(TestCase):
     def test_current_user_requires_authentication(self):
@@ -233,6 +255,27 @@ class SignupOtpTests(TestCase):
         self.assertTrue(payload["status"])
         self.assertEqual(payload["email"], "grace@example.com")
         self.assertNotIn("debug_otp", payload)
+
+    @patch("Core.views.CustomUser.objects.filter", side_effect=OperationalError("db down"))
+    def test_request_signup_otp_returns_503_when_database_is_unavailable(self, _filter):
+        response = self.client.post(
+            "/signup/request_otp/",
+            {
+                "first_name": "Grace",
+                "last_name": "Hopper",
+                "email": "grace@example.com",
+                "password": "StrongPass!123",
+            },
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {
+                "error": "Database is temporarily unavailable. Please try again shortly.",
+                "status": False,
+            },
+        )
 
     @patch("Core.views.send_signup_otp_email")
     def test_request_signup_otp_enforces_resend_cooldown(self, send_signup_otp_email):
@@ -349,6 +392,24 @@ class SignupOtpTests(TestCase):
             },
         )
         self.assertFalse(PendingSignup.objects.filter(email="grace@example.com").exists())
+
+
+class TokenApiTests(TestCase):
+    @patch("Core.views.TokenObtainPairView.post", side_effect=OperationalError("db down"))
+    def test_token_obtain_returns_503_when_database_is_unavailable(self, _post):
+        response = self.client.post(
+            "/api/token/",
+            {"email": "grace@example.com", "password": "StrongPass!123"},
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {
+                "error": "Database is temporarily unavailable. Please try again shortly.",
+                "status": False,
+            },
+        )
 
 
 class EmailServiceTests(TestCase):
