@@ -4,13 +4,17 @@ from urllib.parse import urlsplit
 
 import requests
 from django.conf import settings
+from django.contrib.auth.tokens import default_token_generator
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ImproperlyConfigured
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import DatabaseError, IntegrityError, transaction
 from django.shortcuts import render
 from django.urls import reverse
+from django.utils.crypto import salted_hmac
+from django.utils.encoding import force_bytes, force_str
 from django.utils import timezone
+from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from google.auth import exceptions as google_exceptions
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
@@ -20,10 +24,15 @@ from rest_framework.decorators import permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from .email_service import EmailDeliveryError, send_signup_otp_email
-from .models import CustomUser, PendingSignup
+from .authentication import (
+    PasswordBoundTokenObtainPairSerializer,
+    PasswordBoundTokenRefreshSerializer,
+    get_password_change_marker,
+)
+from .email_service import EmailDeliveryError, send_password_reset_email, send_signup_otp_email
+from .models import CustomUser, PasswordResetThrottle, PendingSignup
 
 logger = logging.getLogger(__name__)
 
@@ -91,15 +100,19 @@ def frontend_context():
         "signupOtpLength": settings.SIGNUP_OTP_LENGTH,
         "signupOtpExpiryMinutes": settings.SIGNUP_OTP_EXPIRY_MINUTES,
         "signupOtpResendCooldownSeconds": settings.SIGNUP_OTP_RESEND_COOLDOWN_SECONDS,
+        "passwordResetTimeoutSeconds": settings.PASSWORD_RESET_TIMEOUT,
         "urls": {
             "home": reverse("home"),
             "verify": reverse("verify_page"),
+            "passwordResetRequestPage": reverse("password_reset_request_page"),
             "dashboard": reverse("dashboard_page"),
             "currentUser": reverse("current_user"),
             "googleLogin": reverse("google_login"),
             "requestSignupOtp": reverse("request_signup_otp"),
             "resendSignupOtp": reverse("resend_signup_otp"),
             "verifySignupOtp": reverse("verify_signup_otp"),
+            "requestPasswordReset": reverse("request_password_reset"),
+            "confirmPasswordReset": reverse("confirm_password_reset"),
             "tokenObtainPair": reverse("token_obtain_pair"),
             "tokenRefresh": reverse("token_refresh"),
         },
@@ -111,12 +124,14 @@ def frontend_context():
         "signup_otp_length": settings.SIGNUP_OTP_LENGTH,
         "signup_otp_expiry_minutes": settings.SIGNUP_OTP_EXPIRY_MINUTES,
         "signup_otp_resend_cooldown_seconds": settings.SIGNUP_OTP_RESEND_COOLDOWN_SECONDS,
+        "password_reset_timeout_seconds": settings.PASSWORD_RESET_TIMEOUT,
         "frontend_config": frontend_config,
     }
 
 
 def auth_success_response(user):
     refresh = RefreshToken.for_user(user)
+    refresh["pwd"] = get_password_change_marker(user)
     return Response(
         {
             "tokens": {
@@ -131,11 +146,24 @@ def auth_success_response(user):
 
 
 class SafeTokenObtainPairView(TokenObtainPairView):
+    serializer_class = PasswordBoundTokenObtainPairSerializer
+
     def post(self, request, *args, **kwargs):
         try:
             return super().post(request, *args, **kwargs)
         except DatabaseError:
             logger.exception("Database operation failed in token obtain flow")
+            return database_unavailable_response()
+
+
+class SafeTokenRefreshView(TokenRefreshView):
+    serializer_class = PasswordBoundTokenRefreshSerializer
+
+    def post(self, request, *args, **kwargs):
+        try:
+            return super().post(request, *args, **kwargs)
+        except DatabaseError:
+            logger.exception("Database operation failed in token refresh flow")
             return database_unavailable_response()
 
 
@@ -205,6 +233,56 @@ def send_pending_signup_otp(pending_signup):
     )
     pending_signup.save()
     return email_delivery_result
+
+
+def password_reset_request_response():
+    return Response(
+        {
+            "message": (
+                "If the email belongs to an active account with password sign-in enabled, "
+                "a reset link will arrive shortly."
+            ),
+            "status": True,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+def password_reset_error_response():
+    return Response(
+        {
+            "error": "This password reset link is invalid or has expired. Request a new one.",
+            "status": False,
+        },
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+
+def fingerprint_email(email):
+    return salted_hmac("password-reset-throttle", email).hexdigest()
+
+
+def user_can_reset_password(user):
+    return bool(user and user.is_active and user.has_usable_password())
+
+
+def get_password_reset_user(uidb64):
+    try:
+        user_id = force_str(urlsafe_base64_decode(uidb64))
+        return CustomUser.objects.filter(pk=user_id).first()
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def build_password_reset_url(request, user):
+    uidb64 = urlsafe_base64_encode(force_bytes(user.pk))
+    token = default_token_generator.make_token(user)
+    return request.build_absolute_uri(
+        reverse(
+            "password_reset_confirm_page",
+            kwargs={"uidb64": uidb64, "token": token},
+        )
+    )
 
 
 @api_view(["POST"])
@@ -419,6 +497,92 @@ def verify_signup_otp(request):
     return auth_success_response(user)
 
 
+@api_view(["POST"])
+@database_guard
+def request_password_reset(request):
+    email = normalize_email_address(request.data.get("email"))
+    if not email:
+        return Response(
+            {"error": "Email is required.", "status": False},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    user = CustomUser.objects.filter(email=email).first()
+    if not user_can_reset_password(user):
+        return password_reset_request_response()
+
+    email_fingerprint = fingerprint_email(email)
+    throttle = PasswordResetThrottle.objects.filter(
+        email_fingerprint=email_fingerprint
+    ).first()
+    if throttle and not throttle.can_send():
+        return password_reset_request_response()
+
+    try:
+        send_password_reset_email(
+            recipient_email=user.email,
+            first_name=user.first_name,
+            reset_url=build_password_reset_url(request, user),
+        )
+    except ImproperlyConfigured:
+        logger.exception("Password reset email is not configured correctly")
+        return password_reset_request_response()
+    except EmailDeliveryError:
+        logger.exception("Password reset email delivery failed")
+        return password_reset_request_response()
+
+    PasswordResetThrottle.objects.update_or_create(
+        email_fingerprint=email_fingerprint,
+        defaults={"last_sent_at": timezone.now()},
+    )
+    return password_reset_request_response()
+
+
+@api_view(["POST"])
+@database_guard
+def confirm_password_reset(request):
+    uidb64 = str(request.data.get("uid", "")).strip()
+    token = str(request.data.get("token", "")).strip()
+    password = str(request.data.get("password", ""))
+
+    if not uidb64 or not token or not password:
+        return Response(
+            {"error": "Reset link and new password are required.", "status": False},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    user = get_password_reset_user(uidb64)
+    if not user_can_reset_password(user):
+        return password_reset_error_response()
+
+    if not default_token_generator.check_token(user, token):
+        return password_reset_error_response()
+
+    try:
+        validate_password(password, user=user)
+    except DjangoValidationError as exc:
+        detail = {"password": exc.messages}
+        return Response(
+            {
+                "error": exc.messages[0],
+                "errors": detail,
+                "status": False,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    user.set_password(password)
+    user.save(update_fields=["password", "password_changed_at"])
+
+    return Response(
+        {
+            "message": "Password updated successfully. Sign in with your new password.",
+            "status": True,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 @database_guard
@@ -595,6 +759,17 @@ def Home(request):
 
 def verify_page(request):
     return render(request, "Core/verify.html", frontend_context())
+
+
+def password_reset_request_page(request):
+    return render(request, "Core/password_reset_request.html", frontend_context())
+
+
+def password_reset_confirm_page(request, uidb64, token):
+    context = frontend_context()
+    context["password_reset_uid"] = uidb64
+    context["password_reset_token"] = token
+    return render(request, "Core/password_reset_confirm.html", context)
 
 
 def dashboard_page(request):

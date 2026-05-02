@@ -10,12 +10,30 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
-import dj_database_url
-from decouple import config
-from dotenv import load_dotenv
+try:
+    import dj_database_url
+except ImportError:  # pragma: no cover - local fallback when optional dependency is absent
+    dj_database_url = None
+try:
+    from decouple import config
+except ImportError:  # pragma: no cover - local fallback when optional dependency is absent
+    def config(name, default=None, cast=str):
+        value = os.environ.get(name, default)
+        if value is None:
+            return None
+        if cast is None:
+            return value
+        return cast(value)
+
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - local fallback when optional dependency is absent
+    def load_dotenv(_path):
+        return False
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -243,7 +261,7 @@ WSGI_APPLICATION = 'FakeKilo.wsgi.application'
 #     }
 # }
 DATABASE_URL = str(config("DATABASE_URL", default="")).strip()
-if DATABASE_URL:
+if DATABASE_URL and dj_database_url is not None:
     DATABASES = {
         'default': dj_database_url.parse(
             DATABASE_URL,
@@ -315,7 +333,7 @@ AUTH_USER_MODEL = 'Core.CustomUser'
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'Core.authentication.PasswordBoundJWTAuthentication',
     ]
 }
 
@@ -358,4 +376,10 @@ SIGNUP_OTP_MAX_ATTEMPTS = config(
     "SIGNUP_OTP_MAX_ATTEMPTS",
     cast=int,
     default=5,
+)
+PASSWORD_RESET_TIMEOUT = config("PASSWORD_RESET_TIMEOUT", cast=int, default=3600)
+PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS = config(
+    "PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS",
+    cast=int,
+    default=60,
 )

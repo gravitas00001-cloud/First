@@ -75,6 +75,9 @@
                         <input type="password" name="password" autocomplete="current-password" placeholder="Enter your password" required>
                     </label>
                     <div id="loginFeedback" class="form-feedback" hidden></div>
+                    <div class="form-inline-links">
+                        <a class="text-link" href="{% url 'password_reset_request_page' %}">Forgot your password?</a>
+                    </div>
                     <button id="loginSubmitButton" type="submit" class="button button-primary">Open dashboard</button>
                 </form>
             </section>

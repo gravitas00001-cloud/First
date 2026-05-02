@@ -46,6 +46,7 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     is_staff = models.BooleanField(default=False)
     is_superuser = models.BooleanField(default=False, help_text="Indicates whether the User has all Admin Permission")
     date_joined = models.DateTimeField(auto_now_add=True, help_text="The Date and Time when user Joined.")
+    password_changed_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
         return self.email
@@ -57,6 +58,10 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
 
     def get_full_name(self):
         return f"{self.first_name} {self.last_name}"
+
+    def set_password(self, raw_password):
+        super().set_password(raw_password)
+        self.password_changed_at = timezone.now()
 
 
 class PendingSignup(models.Model):
@@ -113,3 +118,22 @@ class PendingSignup(models.Model):
 
     def check_otp(self, raw_otp):
         return check_password(raw_otp, self.otp_hash)
+
+
+class PasswordResetThrottle(models.Model):
+    email_fingerprint = models.CharField(max_length=64, unique=True)
+    last_sent_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-updated_at"]
+
+    @property
+    def resend_available_at(self):
+        return self.last_sent_at + timedelta(
+            seconds=settings.PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS
+        )
+
+    def can_send(self):
+        return timezone.now() >= self.resend_available_at
