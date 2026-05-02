@@ -67,7 +67,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     async function handleSignup(event) {
         event.preventDefault();
         app.hideFeedback(signupFeedback);
-        setButtonBusy(signupSubmitButton, true, "Send verification code", "Sending code...");
 
         try {
             const formData = new FormData(signupForm);
@@ -77,6 +76,14 @@ document.addEventListener("DOMContentLoaded", async () => {
                 email: String(formData.get("email") || "").trim(),
                 password: String(formData.get("password") || ""),
             };
+            const passwordConfirm = String(formData.get("password_confirm") || "");
+
+            if (payload.password !== passwordConfirm) {
+                app.showFeedback(signupFeedback, "Passwords do not match.", "error");
+                return;
+            }
+
+            setButtonBusy(signupSubmitButton, true, "Send verification code", "Sending code...");
 
             const data = await app.request(config.urls.requestSignupOtp, {
                 method: "POST",

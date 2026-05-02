@@ -24,6 +24,7 @@ class FrontendPageTests(TestCase):
         self.assertContains(response, "Sign in to continue")
         self.assertContains(response, "Create your account")
         self.assertContains(response, "Forgot password?")
+        self.assertContains(response, "Confirm password")
 
     def test_verify_page_renders(self):
         response = self.client.get("/verify/")
