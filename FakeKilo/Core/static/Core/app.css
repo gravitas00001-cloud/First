@@ -310,12 +310,6 @@ input {
     gap: 1rem;
 }
 
-.form-inline-links {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: -0.25rem;
-}
-
 .form-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -325,6 +319,13 @@ input {
 .field {
     display: grid;
     gap: 0.45rem;
+}
+
+.field-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
 }
 
 .field span {
@@ -439,6 +440,12 @@ input {
 .text-link {
     color: var(--accent-cool);
     text-decoration: none;
+    font-weight: 600;
+}
+
+.text-link:hover,
+.text-link:focus-visible {
+    text-decoration: underline;
 }
 
 .dashboard-shell {

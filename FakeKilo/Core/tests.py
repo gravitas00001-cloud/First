@@ -23,7 +23,7 @@ class FrontendPageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Sign in to continue")
         self.assertContains(response, "Create your account")
-        self.assertContains(response, "Forgot your password?")
+        self.assertContains(response, "Forgot password?")
 
     def test_verify_page_renders(self):
         response = self.client.get("/verify/")
