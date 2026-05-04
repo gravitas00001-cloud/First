@@ -6,6 +6,8 @@
         refreshToken: "fakekilo.refreshToken",
         user: "fakekilo.user",
         pendingSignup: "fakekilo.pendingSignup",
+        pendingPasswordReset: "fakekilo.pendingPasswordReset",
+        verifiedPasswordReset: "fakekilo.verifiedPasswordReset",
     };
 
     class ApiError extends Error {
@@ -75,6 +77,30 @@
 
     function clearPendingSignup() {
         window.sessionStorage.removeItem(storageKeys.pendingSignup);
+    }
+
+    function getPendingPasswordReset() {
+        return safeJsonParse(window.sessionStorage.getItem(storageKeys.pendingPasswordReset));
+    }
+
+    function setPendingPasswordReset(payload) {
+        window.sessionStorage.setItem(storageKeys.pendingPasswordReset, JSON.stringify(payload));
+    }
+
+    function clearPendingPasswordReset() {
+        window.sessionStorage.removeItem(storageKeys.pendingPasswordReset);
+    }
+
+    function getVerifiedPasswordReset() {
+        return safeJsonParse(window.sessionStorage.getItem(storageKeys.verifiedPasswordReset));
+    }
+
+    function setVerifiedPasswordReset(payload) {
+        window.sessionStorage.setItem(storageKeys.verifiedPasswordReset, JSON.stringify(payload));
+    }
+
+    function clearVerifiedPasswordReset() {
+        window.sessionStorage.removeItem(storageKeys.verifiedPasswordReset);
     }
 
     function getAuthHeaders(initialHeaders = {}) {
@@ -287,7 +313,9 @@
     window.FakeKiloApp = {
         ApiError,
         clearPendingSignup,
+        clearPendingPasswordReset,
         clearSession,
+        clearVerifiedPasswordReset,
         config,
         decodeJwt,
         extractErrorMessage,
@@ -296,14 +324,18 @@
         getAccessTokenExpiry,
         getDisplayName,
         getPendingSignup,
+        getPendingPasswordReset,
         getRefreshToken,
         getStoredUser,
+        getVerifiedPasswordReset,
         hideFeedback,
         redirectToDashboardIfAuthenticated,
         request,
         refreshAccessToken,
         setPendingSignup,
+        setPendingPasswordReset,
         setSession,
+        setVerifiedPasswordReset,
         showFeedback,
         storageKeys,
     };

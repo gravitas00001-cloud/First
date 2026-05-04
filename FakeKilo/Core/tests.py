@@ -3,17 +3,14 @@ from unittest.mock import patch
 
 import requests
 
-from django.contrib.auth.tokens import default_token_generator
 from django.db import OperationalError
 from django.test import TestCase
 from django.test.utils import override_settings
-from django.utils.encoding import force_bytes
 from django.utils import timezone
-from django.utils.http import urlsafe_base64_encode
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .email_service import EmailDeliveryError, send_password_reset_email, send_signup_otp_email
-from .models import CustomUser, PasswordResetThrottle, PendingSignup
+from .models import CustomUser, PasswordResetThrottle, PendingPasswordReset, PendingSignup
 
 
 class FrontendPageTests(TestCase):
@@ -36,21 +33,11 @@ class FrontendPageTests(TestCase):
         response = self.client.get("/password-reset/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Request a reset link")
+        self.assertContains(response, "Request a reset code")
+        self.assertContains(response, "Confirm your reset code")
 
     def test_password_reset_confirm_page_renders(self):
-        user = CustomUser.objects.create_user(
-            email="ada@example.com",
-            password="secret123",
-            first_name="Ada",
-            last_name="Lovelace",
-            registration_method="email",
-            is_active=True,
-        )
-        uid = urlsafe_base64_encode(force_bytes(user.pk))
-        token = default_token_generator.make_token(user)
-
-        response = self.client.get(f"/password-reset/{uid}/{token}/")
+        response = self.client.get("/password-reset/new/")
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Choose a new password")
@@ -443,7 +430,7 @@ class TokenApiTests(TestCase):
 class PasswordResetTests(TestCase):
     generic_message = (
         "If the email belongs to an active account with password sign-in enabled, "
-        "a reset link will arrive shortly."
+        "a verification code will arrive shortly."
     )
 
     def create_email_user(self, email="ada@example.com", password="StrongPass!123"):
@@ -456,10 +443,26 @@ class PasswordResetTests(TestCase):
             is_active=True,
         )
 
-    def build_reset_payload(self, user, password):
+    def create_pending_password_reset(self, user=None, email="ada@example.com", password="StrongPass!123"):
+        user = user or self.create_email_user(email=email, password=password)
+        pending_reset = PendingPasswordReset(user=user, email=user.email)
+        otp_code = pending_reset.refresh_otp()
+        pending_reset.save()
+        return pending_reset, otp_code
+
+    def build_reset_payload(self, pending_reset, password):
+        reset_token = pending_reset.issue_reset_token()
+        pending_reset.save(
+            update_fields=[
+                "reset_token_hash",
+                "reset_token_expires_at",
+                "verified_at",
+                "updated_at",
+            ]
+        )
         return {
-            "uid": urlsafe_base64_encode(force_bytes(user.pk)),
-            "token": default_token_generator.make_token(user),
+            "email": pending_reset.email,
+            "reset_token": reset_token,
             "password": password,
         }
 
@@ -479,6 +482,7 @@ class PasswordResetTests(TestCase):
         )
         send_password_reset_email.assert_called_once()
         self.assertEqual(PasswordResetThrottle.objects.count(), 1)
+        self.assertEqual(PendingPasswordReset.objects.count(), 1)
 
     @patch("Core.views.send_password_reset_email")
     def test_request_password_reset_returns_same_response_for_unknown_email(self, send_password_reset_email):
@@ -555,9 +559,53 @@ class PasswordResetTests(TestCase):
             response.json(),
             {"message": self.generic_message, "status": True},
         )
+        self.assertEqual(PendingPasswordReset.objects.count(), 0)
+
+    def test_verify_password_reset_otp_returns_reset_token(self):
+        user = self.create_email_user()
+        pending_reset, otp_code = self.create_pending_password_reset(user=user)
+
+        response = self.client.post(
+            "/password-reset/verify_otp/",
+            {"email": pending_reset.email, "otp": otp_code},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["status"])
+        self.assertEqual(payload["email"], pending_reset.email)
+        self.assertTrue(payload["reset_token"])
+
+        pending_reset.refresh_from_db()
+        self.assertTrue(pending_reset.reset_token_hash)
+        self.assertIsNotNone(pending_reset.reset_token_expires_at)
+        self.assertIsNotNone(pending_reset.verified_at)
+
+    def test_verify_password_reset_otp_rejects_invalid_code_and_tracks_attempts(self):
+        user = self.create_email_user()
+        pending_reset, _ = self.create_pending_password_reset(user=user)
+
+        response = self.client.post(
+            "/password-reset/verify_otp/",
+            {"email": pending_reset.email, "otp": "000000"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json(),
+            {
+                "error": "Invalid verification code.",
+                "attempts_remaining": 4,
+                "status": False,
+            },
+        )
+
+        pending_reset.refresh_from_db()
+        self.assertEqual(pending_reset.otp_attempts, 1)
 
     def test_confirm_password_reset_updates_password_and_invalidates_old_tokens(self):
         user = self.create_email_user(password="OldPass!123")
+        pending_reset, _ = self.create_pending_password_reset(user=user, password="OldPass!123")
         login_response = self.client.post(
             "/api/token/",
             {"email": user.email, "password": "OldPass!123"},
@@ -569,7 +617,7 @@ class PasswordResetTests(TestCase):
 
         response = self.client.post(
             "/password-reset/confirm/",
-            self.build_reset_payload(user, "NewPass!456"),
+            self.build_reset_payload(pending_reset, "NewPass!456"),
         )
 
         self.assertEqual(response.status_code, 200)
@@ -602,11 +650,13 @@ class PasswordResetTests(TestCase):
         )
         self.assertEqual(fresh_login_response.status_code, 200)
         self.assertIn("access", fresh_login_response.json())
+        self.assertFalse(PendingPasswordReset.objects.filter(email=user.email).exists())
 
     def test_confirm_password_reset_rejects_invalid_token(self):
         user = self.create_email_user()
-        payload = self.build_reset_payload(user, "NewPass!456")
-        payload["token"] = "invalid-token"
+        pending_reset, _ = self.create_pending_password_reset(user=user)
+        payload = self.build_reset_payload(pending_reset, "NewPass!456")
+        payload["reset_token"] = "invalid-token"
 
         response = self.client.post("/password-reset/confirm/", payload)
 
@@ -614,17 +664,18 @@ class PasswordResetTests(TestCase):
         self.assertEqual(
             response.json(),
             {
-                "error": "This password reset link is invalid or has expired. Request a new one.",
+                "error": "This password reset session is invalid or has expired. Request a new code.",
                 "status": False,
             },
         )
 
     def test_confirm_password_reset_rejects_weak_password(self):
         user = self.create_email_user()
+        pending_reset, _ = self.create_pending_password_reset(user=user)
 
         response = self.client.post(
             "/password-reset/confirm/",
-            self.build_reset_payload(user, "123"),
+            self.build_reset_payload(pending_reset, "123"),
         )
 
         self.assertEqual(response.status_code, 400)
@@ -724,18 +775,17 @@ class EmailServiceTests(TestCase):
         payload = send_password_reset_email(
             recipient_email="grace@example.com",
             first_name="Grace",
-            reset_url="https://example.com/password-reset/link",
+            otp_code="654321",
         )
 
         self.assertEqual(payload["provider"], "smtp")
         email_multi_alternatives.assert_called_once_with(
-            subject="Reset your FakeKilo password",
+            subject="Your FakeKilo password reset code",
             body=(
                 "Hi Grace,\n\n"
                 "We received a request to reset your FakeKilo password.\n"
-                "Use the link below to choose a new password:\n"
-                "https://example.com/password-reset/link\n\n"
-                "This link expires in 1 hour.\n"
+                "Use this verification code to continue: 654321\n"
+                "It expires in 10 minutes.\n\n"
                 "If you did not request a password reset, you can ignore this email."
             ),
             from_email="sender@example.com",

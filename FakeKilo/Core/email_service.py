@@ -59,17 +59,17 @@ def build_signup_otp_email(first_name, otp_code):
     return subject, text, html
 
 
-def build_password_reset_email(first_name, reset_url):
+def build_password_reset_email(first_name, otp_code):
     app_name = settings.APP_NAME
     recipient_name = first_name or "there"
-    reset_window = format_duration_label(settings.PASSWORD_RESET_TIMEOUT)
+    expiry_minutes = settings.PASSWORD_RESET_OTP_EXPIRY_MINUTES
 
-    subject = f"Reset your {app_name} password"
+    subject = f"Your {app_name} password reset code"
     text = (
         f"Hi {recipient_name},\n\n"
         f"We received a request to reset your {app_name} password.\n"
-        f"Use the link below to choose a new password:\n{reset_url}\n\n"
-        f"This link expires in {reset_window}.\n"
+        f"Use this verification code to continue: {otp_code}\n"
+        f"It expires in {expiry_minutes} minutes.\n\n"
         "If you did not request a password reset, you can ignore this email."
     )
     html = f"""
@@ -79,22 +79,11 @@ def build_password_reset_email(first_name, reset_url):
         <p style="margin: 0 0 20px; font-size: 16px; line-height: 1.6;">
           We received a request to reset your {app_name} password.
         </p>
-        <p style="margin: 0 0 24px;">
-          <a href="{reset_url}" style="display: inline-block; padding: 14px 24px; border-radius: 999px; background: #111827; color: #ffffff; text-decoration: none; font-weight: 700;">
-            Reset password
-          </a>
-        </p>
-        <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.6; color: #4b5563;">
-          This link expires in {reset_window}.
-        </p>
-        <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.6; color: #4b5563;">
-          If the button does not open, copy and paste this link into your browser:
-        </p>
-        <p style="margin: 0 0 12px; font-size: 14px; line-height: 1.6; word-break: break-all; color: #111827;">
-          {reset_url}
-        </p>
+        <div style="margin: 24px 0; padding: 18px 20px; border-radius: 12px; background: #111827; color: #ffffff; font-size: 32px; font-weight: 700; letter-spacing: 8px; text-align: center;">
+          {otp_code}
+        </div>
         <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #4b5563;">
-          If you did not request a password reset, you can safely ignore this email.
+          This code expires in {expiry_minutes} minutes. If you did not request a password reset, you can safely ignore this email.
         </p>
       </div>
     </div>
@@ -270,13 +259,15 @@ def send_signup_otp_email(*, recipient_email, first_name, otp_code):
     )
 
 
-def send_password_reset_email(*, recipient_email, first_name, reset_url):
-    subject, text, html = build_password_reset_email(first_name, reset_url)
+def send_password_reset_email(*, recipient_email, first_name, otp_code):
+    subject, text, html = build_password_reset_email(first_name, otp_code)
     return send_transactional_email(
         recipient_email=recipient_email,
         subject=subject,
         text=text,
         html=html,
         console_log_label="password reset",
-        console_extra_log_data=f"link_expires_in={settings.PASSWORD_RESET_TIMEOUT}_sec",
+        console_extra_log_data=(
+            f"code={otp_code} expires_in={settings.PASSWORD_RESET_OTP_EXPIRY_MINUTES}_min"
+        ),
     )

@@ -4,9 +4,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const form = document.getElementById("passwordResetConfirmForm");
     const feedback = document.getElementById("passwordResetConfirmFeedback");
     const submitButton = document.getElementById("passwordResetConfirmSubmitButton");
-    const card = document.querySelector("[data-reset-uid][data-reset-token]");
-    const uid = card ? String(card.dataset.resetUid || "").trim() : "";
-    const token = card ? String(card.dataset.resetToken || "").trim() : "";
+    const verifiedPasswordReset = app.getVerifiedPasswordReset();
 
     function setButtonBusy(busy) {
         submitButton.disabled = busy;
@@ -26,8 +24,11 @@ document.addEventListener("DOMContentLoaded", () => {
             return;
         }
 
-        if (!uid || !token) {
-            app.showFeedback(feedback, "This password reset link is invalid or incomplete.", "error");
+        if (!verifiedPasswordReset || !verifiedPasswordReset.email || !verifiedPasswordReset.reset_token) {
+            app.showFeedback(feedback, "Your password reset session is missing or expired. Request a new code.", "error");
+            window.setTimeout(() => {
+                window.location.assign(config.urls.passwordResetRequestPage);
+            }, 1200);
             return;
         }
 
@@ -37,13 +38,15 @@ document.addEventListener("DOMContentLoaded", () => {
             const data = await app.request(config.urls.confirmPasswordReset, {
                 method: "POST",
                 body: {
-                    uid,
-                    token,
+                    email: verifiedPasswordReset.email,
+                    reset_token: verifiedPasswordReset.reset_token,
                     password,
                 },
             });
 
             app.clearSession();
+            app.clearPendingPasswordReset();
+            app.clearVerifiedPasswordReset();
             app.showFeedback(feedback, data.message, "success");
             form.reset();
             window.setTimeout(() => {

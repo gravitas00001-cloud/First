@@ -4,7 +4,6 @@ from urllib.parse import urlsplit
 
 import requests
 from django.conf import settings
-from django.contrib.auth.tokens import default_token_generator
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ImproperlyConfigured
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -12,9 +11,7 @@ from django.db import DatabaseError, IntegrityError, transaction
 from django.shortcuts import render
 from django.urls import reverse
 from django.utils.crypto import salted_hmac
-from django.utils.encoding import force_bytes, force_str
 from django.utils import timezone
-from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from google.auth import exceptions as google_exceptions
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
@@ -32,7 +29,7 @@ from .authentication import (
     get_password_change_marker,
 )
 from .email_service import EmailDeliveryError, send_password_reset_email, send_signup_otp_email
-from .models import CustomUser, PasswordResetThrottle, PendingSignup
+from .models import CustomUser, PasswordResetThrottle, PendingPasswordReset, PendingSignup
 
 logger = logging.getLogger(__name__)
 
@@ -100,11 +97,15 @@ def frontend_context():
         "signupOtpLength": settings.SIGNUP_OTP_LENGTH,
         "signupOtpExpiryMinutes": settings.SIGNUP_OTP_EXPIRY_MINUTES,
         "signupOtpResendCooldownSeconds": settings.SIGNUP_OTP_RESEND_COOLDOWN_SECONDS,
+        "passwordResetOtpLength": settings.PASSWORD_RESET_OTP_LENGTH,
+        "passwordResetOtpExpiryMinutes": settings.PASSWORD_RESET_OTP_EXPIRY_MINUTES,
+        "passwordResetResendCooldownSeconds": settings.PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS,
         "passwordResetTimeoutSeconds": settings.PASSWORD_RESET_TIMEOUT,
         "urls": {
             "home": reverse("home"),
             "verify": reverse("verify_page"),
             "passwordResetRequestPage": reverse("password_reset_request_page"),
+            "passwordResetConfirmPage": reverse("password_reset_confirm_page"),
             "dashboard": reverse("dashboard_page"),
             "currentUser": reverse("current_user"),
             "googleLogin": reverse("google_login"),
@@ -112,6 +113,8 @@ def frontend_context():
             "resendSignupOtp": reverse("resend_signup_otp"),
             "verifySignupOtp": reverse("verify_signup_otp"),
             "requestPasswordReset": reverse("request_password_reset"),
+            "resendPasswordResetOtp": reverse("resend_password_reset_otp"),
+            "verifyPasswordResetOtp": reverse("verify_password_reset_otp"),
             "confirmPasswordReset": reverse("confirm_password_reset"),
             "tokenObtainPair": reverse("token_obtain_pair"),
             "tokenRefresh": reverse("token_refresh"),
@@ -124,6 +127,9 @@ def frontend_context():
         "signup_otp_length": settings.SIGNUP_OTP_LENGTH,
         "signup_otp_expiry_minutes": settings.SIGNUP_OTP_EXPIRY_MINUTES,
         "signup_otp_resend_cooldown_seconds": settings.SIGNUP_OTP_RESEND_COOLDOWN_SECONDS,
+        "password_reset_otp_length": settings.PASSWORD_RESET_OTP_LENGTH,
+        "password_reset_otp_expiry_minutes": settings.PASSWORD_RESET_OTP_EXPIRY_MINUTES,
+        "password_reset_resend_cooldown_seconds": settings.PASSWORD_RESET_REQUEST_COOLDOWN_SECONDS,
         "password_reset_timeout_seconds": settings.PASSWORD_RESET_TIMEOUT,
         "frontend_config": frontend_config,
     }
@@ -240,7 +246,7 @@ def password_reset_request_response():
         {
             "message": (
                 "If the email belongs to an active account with password sign-in enabled, "
-                "a reset link will arrive shortly."
+                "a verification code will arrive shortly."
             ),
             "status": True,
         },
@@ -251,7 +257,7 @@ def password_reset_request_response():
 def password_reset_error_response():
     return Response(
         {
-            "error": "This password reset link is invalid or has expired. Request a new one.",
+            "error": "This password reset session is invalid or has expired. Request a new code.",
             "status": False,
         },
         status=status.HTTP_400_BAD_REQUEST,
@@ -266,23 +272,31 @@ def user_can_reset_password(user):
     return bool(user and user.is_active and user.has_usable_password())
 
 
-def get_password_reset_user(uidb64):
-    try:
-        user_id = force_str(urlsafe_base64_decode(uidb64))
-        return CustomUser.objects.filter(pk=user_id).first()
-    except (TypeError, ValueError, OverflowError):
-        return None
-
-
-def build_password_reset_url(request, user):
-    uidb64 = urlsafe_base64_encode(force_bytes(user.pk))
-    token = default_token_generator.make_token(user)
-    return request.build_absolute_uri(
-        reverse(
-            "password_reset_confirm_page",
-            kwargs={"uidb64": uidb64, "token": token},
-        )
+def password_reset_rate_limit_response(pending_reset):
+    retry_after = max(
+        int((pending_reset.resend_available_at - timezone.now()).total_seconds()),
+        1,
     )
+
+    return Response(
+        {
+            "error": f"Please wait {retry_after} seconds before requesting another code.",
+            "retry_after": retry_after,
+            "status": False,
+        },
+        status=status.HTTP_429_TOO_MANY_REQUESTS,
+    )
+
+
+def send_pending_password_reset_otp(pending_reset):
+    otp_code = pending_reset.refresh_otp()
+    email_delivery_result = send_password_reset_email(
+        recipient_email=pending_reset.email,
+        first_name=pending_reset.user.first_name,
+        otp_code=otp_code,
+    )
+    pending_reset.save()
+    return email_delivery_result
 
 
 @api_view(["POST"])
@@ -519,11 +533,13 @@ def request_password_reset(request):
         return password_reset_request_response()
 
     try:
-        send_password_reset_email(
-            recipient_email=user.email,
-            first_name=user.first_name,
-            reset_url=build_password_reset_url(request, user),
-        )
+        pending_reset = PendingPasswordReset.objects.filter(email=email).first()
+        if pending_reset is None:
+            pending_reset = PendingPasswordReset(user=user, email=email)
+        else:
+            pending_reset.user = user
+
+        send_pending_password_reset_otp(pending_reset)
     except ImproperlyConfigured:
         logger.exception("Password reset email is not configured correctly")
         return password_reset_request_response()
@@ -540,23 +556,145 @@ def request_password_reset(request):
 
 @api_view(["POST"])
 @database_guard
-def confirm_password_reset(request):
-    uidb64 = str(request.data.get("uid", "")).strip()
-    token = str(request.data.get("token", "")).strip()
-    password = str(request.data.get("password", ""))
-
-    if not uidb64 or not token or not password:
+def resend_password_reset_otp(request):
+    email = normalize_email_address(request.data.get("email"))
+    if not email:
         return Response(
-            {"error": "Reset link and new password are required.", "status": False},
+            {"error": "Email is required.", "status": False},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    user = get_password_reset_user(uidb64)
+    user = CustomUser.objects.filter(email=email).first()
     if not user_can_reset_password(user):
+        return password_reset_request_response()
+
+    pending_reset = PendingPasswordReset.objects.filter(email=email).first()
+    if pending_reset and not pending_reset.can_resend_otp():
+        return password_reset_rate_limit_response(pending_reset)
+
+    try:
+        if pending_reset is None:
+            pending_reset = PendingPasswordReset(user=user, email=email)
+        else:
+            pending_reset.user = user
+
+        send_pending_password_reset_otp(pending_reset)
+    except ImproperlyConfigured:
+        logger.exception("Password reset email is not configured correctly")
+        return password_reset_request_response()
+    except EmailDeliveryError:
+        logger.exception("Password reset email delivery failed")
+        return password_reset_request_response()
+
+    PasswordResetThrottle.objects.update_or_create(
+        email_fingerprint=fingerprint_email(email),
+        defaults={"last_sent_at": timezone.now()},
+    )
+    return password_reset_request_response()
+
+
+@api_view(["POST"])
+@database_guard
+def verify_password_reset_otp(request):
+    email = normalize_email_address(request.data.get("email"))
+    otp = str(request.data.get("otp", "")).strip()
+
+    if not email or not otp:
+        return Response(
+            {"error": "Email and OTP are required.", "status": False},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    pending_reset = PendingPasswordReset.objects.filter(email=email).select_related("user").first()
+    if not pending_reset or not user_can_reset_password(pending_reset.user):
+        return Response(
+            {
+                "error": "This verification code is invalid or has expired. Request a new code.",
+                "status": False,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if pending_reset.otp_is_expired:
+        return Response(
+            {
+                "error": "This verification code has expired. Request a new code.",
+                "status": False,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if pending_reset.otp_attempts_remaining == 0:
+        return Response(
+            {"error": "Too many incorrect attempts. Request a new code.", "status": False},
+            status=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+
+    if not pending_reset.check_otp(otp):
+        pending_reset.otp_attempts += 1
+        pending_reset.save(update_fields=["otp_attempts", "updated_at"])
+
+        if pending_reset.otp_attempts_remaining == 0:
+            return Response(
+                {"error": "Too many incorrect attempts. Request a new code.", "status": False},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
+        return Response(
+            {
+                "error": "Invalid verification code.",
+                "attempts_remaining": pending_reset.otp_attempts_remaining,
+                "status": False,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    reset_token = pending_reset.issue_reset_token()
+    pending_reset.save(
+        update_fields=[
+            "reset_token_hash",
+            "reset_token_expires_at",
+            "verified_at",
+            "updated_at",
+        ]
+    )
+
+    return Response(
+        {
+            "message": "Verification successful. You can now choose a new password.",
+            "email": pending_reset.email,
+            "reset_token": reset_token,
+            "status": True,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["POST"])
+@database_guard
+def confirm_password_reset(request):
+    email = normalize_email_address(request.data.get("email"))
+    reset_token = str(request.data.get("reset_token", "")).strip()
+    password = str(request.data.get("password", ""))
+
+    if not email or not reset_token or not password:
+        return Response(
+            {"error": "Email, reset token, and new password are required.", "status": False},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    pending_reset = (
+        PendingPasswordReset.objects.select_related("user")
+        .filter(email=email, reset_token_expires_at__gt=timezone.now())
+        .first()
+    )
+    if not pending_reset or not user_can_reset_password(pending_reset.user):
         return password_reset_error_response()
 
-    if not default_token_generator.check_token(user, token):
+    if not pending_reset.check_reset_token(reset_token):
         return password_reset_error_response()
+
+    user = pending_reset.user
 
     try:
         validate_password(password, user=user)
@@ -573,6 +711,7 @@ def confirm_password_reset(request):
 
     user.set_password(password)
     user.save(update_fields=["password", "password_changed_at"])
+    pending_reset.delete()
 
     return Response(
         {
@@ -765,11 +904,8 @@ def password_reset_request_page(request):
     return render(request, "Core/password_reset_request.html", frontend_context())
 
 
-def password_reset_confirm_page(request, uidb64, token):
-    context = frontend_context()
-    context["password_reset_uid"] = uidb64
-    context["password_reset_token"] = token
-    return render(request, "Core/password_reset_confirm.html", context)
+def password_reset_confirm_page(request):
+    return render(request, "Core/password_reset_confirm.html", frontend_context())
 
 
 def dashboard_page(request):
