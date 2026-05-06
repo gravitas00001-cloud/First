@@ -22,7 +22,9 @@
         </p>
 
         <div class="inline-note">
-            Codes expire in {{ signup_otp_expiry_minutes }} minutes. Need a different email? Go back and start again.
+            Code expires in
+            <strong id="signupOtpExpiryTimer">{{ signup_otp_expiry_minutes }}:00</strong>.
+            Need a different email? Go back and start again.
         </div>
 
         <form id="verifyOtpForm" class="auth-form">
