@@ -5,6 +5,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const dashboardSubtitle = document.getElementById("dashboardSubtitle");
     const dashboardNotice = document.getElementById("dashboardNotice");
     const dashboardUserName = document.getElementById("dashboardUserName");
+    const dashboardUsername = document.getElementById("dashboardUsername");
     const dashboardEmail = document.getElementById("dashboardEmail");
     const dashboardRegistrationMethod = document.getElementById("dashboardRegistrationMethod");
     const dashboardStatusBadge = document.getElementById("dashboardStatusBadge");
@@ -59,6 +60,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         dashboardGreeting.textContent = `Welcome, ${displayName}.`;
         dashboardSubtitle.textContent = "Your session is active and the protected dashboard is ready.";
         dashboardUserName.textContent = displayName;
+        dashboardUsername.textContent = user.username || "Not set";
         dashboardEmail.textContent = user.email;
         dashboardRegistrationMethod.textContent = formatMethod(user.registration_method);
         dashboardStatusBadge.textContent = "Authenticated";
@@ -83,6 +85,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     async function loadDashboard(showSuccessMessage = false) {
         try {
             const user = await app.fetchCurrentUser();
+            if (app.requiresUsername(user)) {
+                window.location.assign(config.urls.completeProfile);
+                return;
+            }
             renderDashboard(user);
             if (showSuccessMessage) {
                 app.showFeedback(dashboardNotice, "Session refreshed successfully.", "success");

@@ -1,0 +1,73 @@
+{% extends "Core/base.html" %}
+{% load static %}
+
+{% block title %}{{ app_name }} | Choose Username{% endblock %}
+
+{% block body_class %}auth-page{% endblock %}
+
+{% block content %}
+<main class="auth-layout">
+    <section class="hero-panel">
+        <div class="brand-lockup">
+            <div class="brand-mark">FK</div>
+            <div>
+                <p class="eyebrow">One last step</p>
+                <h1>Choose your username</h1>
+            </div>
+        </div>
+        <p class="hero-copy">
+            Your Google account is connected. Pick a username to finish setting up your profile before
+            entering the dashboard.
+        </p>
+        <div class="hero-stack">
+            <article class="hero-card">
+                <span class="hero-card-label">Username rules</span>
+                <strong>Keep it simple and easy to remember.</strong>
+                <p>Use 3 to 30 characters with lowercase letters, numbers, or underscores.</p>
+            </article>
+            <article class="hero-card">
+                <span class="hero-card-label">Stored on profile</span>
+                <strong>This becomes part of your account details.</strong>
+                <p>You will see it on the dashboard once setup is complete.</p>
+            </article>
+        </div>
+    </section>
+
+    <section class="auth-panel">
+        <div class="auth-card">
+            <section class="auth-view is-active">
+                <div class="section-heading">
+                    <p class="eyebrow">Profile setup</p>
+                    <h2>Finish your account</h2>
+                    <p>We only need a username before sending you to the dashboard.</p>
+                </div>
+
+                <form id="completeProfileForm" class="auth-form">
+                    <label class="field">
+                        <span>Username</span>
+                        <input
+                            type="text"
+                            name="username"
+                            autocomplete="username"
+                            placeholder="ada_lovelace"
+                            minlength="3"
+                            maxlength="30"
+                            pattern="[a-z0-9_]{3,30}"
+                            required
+                        >
+                    </label>
+                    <p class="helper-copy">Only lowercase letters, numbers, and underscores are allowed.</p>
+                    <div id="completeProfileFeedback" class="form-feedback" hidden></div>
+                    <button id="completeProfileSubmitButton" type="submit" class="button button-primary">
+                        Save username
+                    </button>
+                </form>
+            </section>
+        </div>
+    </section>
+</main>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="{% static 'Core/username.js' %}" defer></script>
+{% endblock %}

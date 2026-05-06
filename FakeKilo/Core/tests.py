@@ -42,6 +42,12 @@ class FrontendPageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Choose a new password")
 
+    def test_complete_profile_page_renders(self):
+        response = self.client.get("/complete-profile/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Choose your username")
+
     def test_dashboard_page_renders(self):
         response = self.client.get("/dashboard/")
 
@@ -105,11 +111,14 @@ class GoogleAuthTests(TestCase):
         self.assertTrue(payload["status"])
         self.assertIn("access", payload["tokens"])
         self.assertIn("refresh", payload["tokens"])
+        self.assertIsNone(payload["user"]["username"])
+        self.assertTrue(payload["user"]["requires_username"])
 
         user = CustomUser.objects.get(email="ada@example.com")
         self.assertEqual(user.registration_method, "google")
         self.assertTrue(user.is_active)
         self.assertFalse(user.has_usable_password())
+        self.assertIsNone(user.username)
 
     @patch("Core.views.id_token.verify_oauth2_token")
     def test_google_token_login_rejects_existing_email_account(self, verify_oauth2_token):
@@ -198,9 +207,87 @@ class CurrentUserApiTests(TestCase):
                     "email": "ada@example.com",
                     "first_name": "Ada",
                     "last_name": "Lovelace",
+                    "username": None,
                     "registration_method": "email",
+                    "requires_username": False,
                 },
                 "status": True,
+            },
+        )
+
+
+class UsernameUpdateTests(TestCase):
+    def test_update_username_requires_authentication(self):
+        response = self.client.post("/api/profile/username/", {"username": "ada_user"})
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_update_username_saves_username_for_google_user(self):
+        user = CustomUser.objects.create_user(
+            email="ada@example.com",
+            password="secret123",
+            first_name="Ada",
+            last_name="Lovelace",
+            registration_method="google",
+            is_active=True,
+        )
+        access_token = str(RefreshToken.for_user(user).access_token)
+
+        response = self.client.post(
+            "/api/profile/username/",
+            {"username": "ada_user"},
+            HTTP_AUTHORIZATION=f"Bearer {access_token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "message": "Username saved successfully.",
+                "user": {
+                    "email": "ada@example.com",
+                    "first_name": "Ada",
+                    "last_name": "Lovelace",
+                    "username": "ada_user",
+                    "registration_method": "google",
+                    "requires_username": False,
+                },
+                "status": True,
+            },
+        )
+
+        user.refresh_from_db()
+        self.assertEqual(user.username, "ada_user")
+
+    def test_update_username_rejects_duplicate_username(self):
+        CustomUser.objects.create_user(
+            email="grace@example.com",
+            password="secret123",
+            username="grace_user",
+            registration_method="email",
+            is_active=True,
+        )
+        user = CustomUser.objects.create_user(
+            email="ada@example.com",
+            password="secret123",
+            registration_method="google",
+            is_active=True,
+        )
+        access_token = str(RefreshToken.for_user(user).access_token)
+
+        response = self.client.post(
+            "/api/profile/username/",
+            {"username": "GRACE_USER"},
+            HTTP_AUTHORIZATION=f"Bearer {access_token}",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json(),
+            {
+                "error": "That username is already taken.",
+                "errors": {"username": ["That username is already taken."]},
+                "status": False,
             },
         )
 

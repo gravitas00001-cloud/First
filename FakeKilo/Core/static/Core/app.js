@@ -242,13 +242,24 @@
         }
 
         try {
-            await fetchCurrentUser();
-            window.location.assign(config.urls.dashboard);
+            const user = await fetchCurrentUser();
+            const targetUrl = getAuthenticatedLandingUrl(user);
+            if (targetUrl) {
+                window.location.assign(targetUrl);
+            }
             return true;
         } catch (error) {
             clearSession();
             return false;
         }
+    }
+
+    function requiresUsername(user) {
+        return Boolean(user && user.requires_username);
+    }
+
+    function getAuthenticatedLandingUrl(user) {
+        return requiresUsername(user) ? config.urls.completeProfile : config.urls.dashboard;
     }
 
     function getDisplayName(user) {
@@ -257,7 +268,7 @@
         }
 
         const fullName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
-        return fullName || user.email || config.appName || "there";
+        return fullName || user.username || user.email || config.appName || "there";
     }
 
     function decodeJwt(token) {
@@ -322,10 +333,12 @@
         fetchCurrentUser,
         getAccessToken,
         getAccessTokenExpiry,
+        getAuthenticatedLandingUrl,
         getDisplayName,
         getPendingSignup,
         getPendingPasswordReset,
         getRefreshToken,
+        requiresUsername,
         getStoredUser,
         getVerifiedPasswordReset,
         hideFeedback,

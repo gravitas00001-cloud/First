@@ -38,6 +38,14 @@ class CustomUserManager(BaseUserManager):
 class CustomUser(AbstractBaseUser, PermissionsMixin):
     first_name = models.CharField(max_length=30, default='', null=True, blank=True, help_text="The User's First Name.")
     last_name = models.CharField(max_length=30, default='', null=True, blank=True, help_text="The User's Last Name.")
+    username = models.CharField(
+        max_length=30,
+        unique=True,
+        null=True,
+        blank=True,
+        default=None,
+        help_text="The User's Unique Username.",
+    )
 
     registration_method = models.CharField(max_length=20, choices=REGISTRATION_CHOICES, default='email')
 

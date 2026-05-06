@@ -1,4 +1,5 @@
 import logging
+import re
 from functools import wraps
 from urllib.parse import urlsplit
 
@@ -32,6 +33,7 @@ from .email_service import EmailDeliveryError, send_password_reset_email, send_s
 from .models import CustomUser, PasswordResetThrottle, PendingPasswordReset, PendingSignup
 
 logger = logging.getLogger(__name__)
+USERNAME_PATTERN = re.compile(r"^[a-z0-9_]{3,30}$")
 
 
 def normalize_origin(origin):
@@ -52,6 +54,14 @@ def normalize_email_address(email):
     return CustomUser.objects.normalize_email(str(email).strip())
 
 
+def normalize_username(username):
+    return str(username or "").strip().lower()
+
+
+def user_requires_username(user):
+    return bool(user and user.registration_method == "google" and not user.username)
+
+
 def response_payload_or_text(response):
     try:
         return response.json()
@@ -64,8 +74,31 @@ def serialize_user(user):
         "email": user.email,
         "first_name": user.first_name,
         "last_name": user.last_name,
+        "username": user.username,
         "registration_method": user.registration_method,
+        "requires_username": user_requires_username(user),
     }
+
+
+def validate_username_value(username, *, current_user=None):
+    errors = {}
+
+    if not username:
+        errors["username"] = "Username is required."
+    elif not USERNAME_PATTERN.fullmatch(username):
+        errors["username"] = (
+            "Username must be 3 to 30 characters and use only lowercase letters, numbers, or underscores."
+        )
+    else:
+        existing_username = CustomUser.objects.filter(username__iexact=username)
+        if current_user is not None:
+            existing_username = existing_username.exclude(pk=current_user.pk)
+
+        if existing_username.exists():
+            errors["username"] = "That username is already taken."
+
+    if errors:
+        raise DjangoValidationError(errors)
 
 
 def database_unavailable_response():
@@ -106,9 +139,11 @@ def frontend_context():
             "verify": reverse("verify_page"),
             "passwordResetRequestPage": reverse("password_reset_request_page"),
             "passwordResetConfirmPage": reverse("password_reset_confirm_page"),
+            "completeProfile": reverse("complete_profile_page"),
             "dashboard": reverse("dashboard_page"),
             "currentUser": reverse("current_user"),
             "googleLogin": reverse("google_login"),
+            "updateUsername": reverse("update_username"),
             "requestSignupOtp": reverse("request_signup_otp"),
             "resendSignupOtp": reverse("resend_signup_otp"),
             "verifySignupOtp": reverse("verify_signup_otp"),
@@ -736,6 +771,42 @@ def current_user(request):
 
 
 @api_view(["POST"])
+@permission_classes([IsAuthenticated])
+@database_guard
+def update_username(request):
+    username = normalize_username(request.data.get("username"))
+
+    try:
+        validate_username_value(username, current_user=request.user)
+    except DjangoValidationError as exc:
+        detail = getattr(exc, "message_dict", None) or {"non_field_errors": exc.messages}
+        first_error = next(iter(detail.values()))
+        if isinstance(first_error, list):
+            first_error = first_error[0]
+
+        return Response(
+            {
+                "error": first_error,
+                "errors": detail,
+                "status": False,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    request.user.username = username
+    request.user.save(update_fields=["username"])
+
+    return Response(
+        {
+            "message": "Username saved successfully.",
+            "user": serialize_user(request.user),
+            "status": True,
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@api_view(["POST"])
 @database_guard
 def google_auth(request):
     code = request.data.get("code")
@@ -906,6 +977,10 @@ def password_reset_request_page(request):
 
 def password_reset_confirm_page(request):
     return render(request, "Core/password_reset_confirm.html", frontend_context())
+
+
+def complete_profile_page(request):
+    return render(request, "Core/complete_profile.html", frontend_context())
 
 
 def dashboard_page(request):

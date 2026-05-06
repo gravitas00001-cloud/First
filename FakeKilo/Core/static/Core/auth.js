@@ -120,7 +120,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
             app.setSession(data.tokens, data.user);
             app.clearPendingSignup();
-            window.location.assign(config.urls.dashboard);
+            window.location.assign(app.getAuthenticatedLandingUrl(data.user));
         } catch (error) {
             app.showFeedback(loginFeedback, error.message, "error");
         } finally {
@@ -229,7 +229,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                     redirect_uri: window.location.origin + window.location.pathname,
                 });
                 googleAuthButton.disabled = false;
-                googleHelperText.textContent = "Google sign-in is ready and will route successful users to the dashboard.";
+                googleHelperText.textContent = "Google sign-in is ready and will route successful users to the next step.";
                 return;
             }
 
