@@ -31,7 +31,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
     }
 
-    emailLabel.textContent = pendingSignup.email;
+    emailLabel.textContent = app.maskEmailAddress(pendingSignup.email);
 
     function setButtonBusy(button, busy, idleLabel, busyLabel) {
         button.disabled = busy;

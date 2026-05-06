@@ -32,7 +32,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         emailInput.value = email;
         emailInput.readOnly = true;
         introNote.textContent = "Check your inbox, then enter the verification code below to continue.";
-        emailLabel.textContent = email;
+        emailLabel.textContent = app.maskEmailAddress(email);
         otpSection.hidden = false;
         startOtpExpiryCountdown();
     }

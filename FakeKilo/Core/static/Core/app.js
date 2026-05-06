@@ -271,6 +271,22 @@
         return fullName || user.username || user.email || config.appName || "there";
     }
 
+    function maskEmailAddress(email) {
+        const normalizedEmail = String(email || "").trim();
+        const atIndex = normalizedEmail.indexOf("@");
+
+        if (atIndex <= 0 || atIndex === normalizedEmail.length - 1) {
+            return normalizedEmail;
+        }
+
+        const localPart = normalizedEmail.slice(0, atIndex);
+        const domainPart = normalizedEmail.slice(atIndex + 1);
+        const visibleLocalPart = localPart.slice(0, 3);
+        const hiddenCharacterCount = Math.max(localPart.length - visibleLocalPart.length, 1);
+
+        return `${visibleLocalPart}${"*".repeat(hiddenCharacterCount)}${domainPart}`;
+    }
+
     function decodeJwt(token) {
         try {
             const tokenParts = token.split(".");
@@ -335,6 +351,7 @@
         getAccessTokenExpiry,
         getAuthenticatedLandingUrl,
         getDisplayName,
+        maskEmailAddress,
         getPendingSignup,
         getPendingPasswordReset,
         getRefreshToken,
